@@ -1,4 +1,6 @@
-import { supabase } from '@/lib/supabase'
+'use client'
+
+import { useEffect, useState } from 'react'
 import type {
   WeeklyAOV, MonthlySummary, CategoryMix,
   TopSKU, SpikeEvent, PaycheckPattern, NewSKU
@@ -12,61 +14,66 @@ import PaycheckChart from '@/components/PaycheckChart'
 import NewSKUsTable from '@/components/NewSKUsTable'
 import MetricCard from '@/components/MetricCard'
 
-export const revalidate = 3600
-export const dynamic = 'force-dynamic'
-
-async function getData() {
-  const [
-    { data: weeklyAov },
-    { data: monthly },
-    { data: catMix },
-    { data: topSkus },
-    { data: spikes },
-    { data: paycheck },
-    { data: newSkus },
-  ] = await Promise.all([
-    supabase.from('weekly_aov').select('*').order('week'),
-    supabase.from('monthly_summary').select('*').order('month'),
-    supabase.from('category_mix').select('*').order('month'),
-    supabase.from('top_skus').select('*').order('total_rev', { ascending: false }),
-    supabase.from('spike_events').select('*').order('week'),
-    supabase.from('paycheck_pattern').select('*'),
-    supabase.from('new_skus_2026').select('*').order('revenue', { ascending: false }),
-  ])
-
-  return {
-    weeklyAov: (weeklyAov ?? []) as WeeklyAOV[],
-    monthly: (monthly ?? []) as MonthlySummary[],
-    catMix: (catMix ?? []) as CategoryMix[],
-    topSkus: (topSkus ?? []) as TopSKU[],
-    spikes: (spikes ?? []) as SpikeEvent[],
-    paycheck: (paycheck ?? []) as PaycheckPattern[],
-    newSkus: (newSkus ?? []) as NewSKU[],
-  }
+type DashboardData = {
+  weeklyAov: WeeklyAOV[]
+  monthly: MonthlySummary[]
+  catMix: CategoryMix[]
+  topSkus: TopSKU[]
+  spikes: SpikeEvent[]
+  paycheck: PaycheckPattern[]
+  newSkus: NewSKU[]
 }
 
 function summaryStats(weeklyAov: WeeklyAOV[], monthly: MonthlySummary[]) {
   const timaurd = weeklyAov.filter(d => d.warehouse === 'NBOF1 - TIMAURD').sort((a, b) => a.week.localeCompare(b.week))
   const safari  = weeklyAov.filter(d => d.warehouse === 'NBOF3 - SAFARI').sort((a, b) => a.week.localeCompare(b.week))
-
   const latestT = timaurd[timaurd.length - 2]
   const latestS = safari[safari.length - 2]
   const baseT   = timaurd[0]
-  const baseS   = safari[0]
-  const peakT   = timaurd.reduce((m, d) => d.aov > m.aov ? d : m, timaurd[0])
-
+  const peakT   = timaurd.reduce((m, d) => (d.aov > m.aov ? d : m), timaurd[0] ?? { aov: 0, week: '' })
   const totalRev = monthly.reduce((s, d) => s + (d.rev ?? 0), 0)
-  const totalOrders = monthly.reduce((s, d) => s + (d.total_orders ?? 0), 0)
   const avgMargin = monthly.filter(d => d.warehouse === 'NBOF1 - TIMAURD')
     .reduce((s, d, _, a) => s + d.margin_pct / a.length, 0)
-
-  return { latestT, latestS, baseT, baseS, peakT, totalRev, totalOrders, avgMargin }
+  return { latestT, latestS, baseT, peakT, totalRev, avgMargin }
 }
 
-export default async function Dashboard() {
-  const { weeklyAov, monthly, catMix, topSkus, spikes, paycheck, newSkus } = await getData()
-  const { latestT, latestS, baseT, peakT, totalRev, totalOrders, avgMargin } = summaryStats(weeklyAov, monthly)
+export default function Dashboard() {
+  const [data, setData] = useState<DashboardData | null>(null)
+  const [loading, setLoading] = useState(true)
 
+  useEffect(() => {
+    async function load() {
+      try {
+        const [weeklyAov, monthly, catMix, topSkus, spikes, paycheck, newSkus] = await Promise.all([
+          fetch('/data/weekly_aov.json').then(r => r.json()),
+          fetch('/data/monthly_summary.json').then(r => r.json()),
+          fetch('/data/category_mix.json').then(r => r.json()),
+          fetch('/data/top_skus.json').then(r => r.json()),
+          fetch('/data/spike_events.json').then(r => r.json()),
+          fetch('/data/paycheck_pattern.json').then(r => r.json()),
+          fetch('/data/new_skus_2026.json').then(r => r.json()),
+        ])
+        setData({ weeklyAov, monthly, catMix, topSkus, spikes, paycheck, newSkus })
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
+  }, [])
+
+  if (loading || !data) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="text-center space-y-3">
+          <div className="w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-slate-400 text-sm">Loading dashboard data…</p>
+        </div>
+      </div>
+    )
+  }
+
+  const { weeklyAov, monthly, catMix, topSkus, spikes, paycheck, newSkus } = data
+  const { latestT, latestS, baseT, peakT, totalRev, avgMargin } = summaryStats(weeklyAov, monthly)
   const aovGrowthT = baseT ? ((latestT?.aov - baseT.aov) / baseT.aov * 100) : 0
 
   return (
@@ -143,25 +150,25 @@ export default async function Dashboard() {
           <div className="mb-5">
             <h2 className="text-base font-semibold text-slate-100">Weekly AOV Trend</h2>
             <p className="text-xs text-slate-500 mt-1">
-              True average order value (basket size net of VAT) · Dashed lines mark key events
+              True average basket value (net of VAT) · Dashed lines mark key events
             </p>
           </div>
           <AOVTrendChart data={weeklyAov} />
-          <div className="mt-4 flex flex-wrap gap-4 text-xs text-slate-500 border-t border-slate-800 pt-3">
+          <div className="mt-4 flex flex-wrap gap-x-6 gap-y-1 text-xs text-slate-500 border-t border-slate-800 pt-3">
             {[
-              { label: 'Sep 15 2025 — Back-to-school ultra-premium BWS spike (SAFARI +36%)', color: 'text-amber-400' },
-              { label: 'Nov 17 2025 — Pre-Christmas wine & spirits ramp begins', color: 'text-amber-400' },
-              { label: 'Dec 22 2025 — Christmas peak: JW Icon LE, White Cap, Baileys', color: 'text-amber-400' },
-              { label: 'Apr 13 2026 — Easter week (Good Friday Apr 18)', color: 'text-amber-400' },
+              'Sep 15 2025 — Back-to-school ultra-premium BWS spike (SAFARI +36%)',
+              'Nov 17 2025 — Pre-Christmas wine & spirits ramp begins',
+              'Dec 22 2025 — Christmas peak: JW Icon LE, White Cap, Baileys',
+              'Apr 13 2026 — Easter week (Good Friday Apr 18)',
             ].map(e => (
-              <span key={e.label} className={e.color}>⸻ {e.label}</span>
+              <span key={e} className="text-amber-500/80">⸻ {e}</span>
             ))}
           </div>
         </section>
 
         {/* Revenue + Margin Charts */}
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {['NBOF1 - TIMAURD', 'NBOF3 - SAFARI'].map(wh => (
+          {(['NBOF1 - TIMAURD', 'NBOF3 - SAFARI'] as const).map(wh => (
             <div key={wh} className="rounded-xl border border-slate-800 bg-slate-900 p-6">
               <div className="mb-4">
                 <h2 className="text-base font-semibold text-slate-100">
@@ -176,7 +183,7 @@ export default async function Dashboard() {
 
         {/* Category Mix */}
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {['NBOF1 - TIMAURD', 'NBOF3 - SAFARI'].map(wh => (
+          {(['NBOF1 - TIMAURD', 'NBOF3 - SAFARI'] as const).map(wh => (
             <div key={wh} className="rounded-xl border border-slate-800 bg-slate-900 p-6">
               <div className="mb-4">
                 <h2 className="text-base font-semibold text-slate-100">
@@ -200,13 +207,10 @@ export default async function Dashboard() {
             </div>
             <SpikeEventsTable data={spikes} />
           </div>
-
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-6">
             <div className="mb-4">
               <h2 className="text-base font-semibold text-slate-100">Top Revenue SKUs — Full Year</h2>
-              <p className="text-xs text-slate-500 mt-1">
-                Top 15 by total revenue · Top 20 = 11–14% of total revenue
-              </p>
+              <p className="text-xs text-slate-500 mt-1">Top 15 by total revenue · Top 20 = 11–14% of total</p>
             </div>
             <TopSKUsTable data={topSkus} />
           </div>
@@ -217,13 +221,13 @@ export default async function Dashboard() {
           <div className="mb-5">
             <h2 className="text-base font-semibold text-slate-100">Paycheck Pattern — AOV by Week-in-Month</h2>
             <p className="text-xs text-slate-500 mt-1">
-              W4 (22nd–31st) consistently highest · End-of-month salary run drives +2.5–4% AOV lift
+              W4 (22nd–31st) is consistently highest · End-of-month salary run drives +2.5–4% AOV lift
             </p>
           </div>
           <PaycheckChart data={paycheck} />
         </section>
 
-        {/* New SKUs + Promo note */}
+        {/* New SKUs + Commercial Insights */}
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-6">
             <div className="mb-4">
@@ -243,11 +247,11 @@ export default async function Dashboard() {
             <div className="space-y-3 text-sm">
               {[
                 { icon: '🏆', title: 'Christmas is the AOV peak', body: 'Dec 2025: TIMAURD 1,997 KES (+42% vs May baseline). JW Black Icon LE, Baileys, and White Cap drove the surge. Pre-position premium spirits from Nov 10.' },
-                { icon: '💸', title: 'Zero formal promotions — untapped lever', body: '0.04% of revenue came from discounts across 52 weeks. No AOV spike is promo-driven; all are pure demand mix changes. A single threshold mechanic could test elasticity at minimal cost.' },
+                { icon: '💸', title: 'Zero formal promotions — untapped lever', body: '0.04% of revenue came from discounts across 52 weeks. A single threshold mechanic (e.g. 10% off over 3,000 KES) could test AOV elasticity at minimal cost.' },
                 { icon: '🌀', title: 'Jinro Soju is the volatility driver', body: '4 flavours, ~3.3M KES since Jan 2026 but ±100–200K weekly swings. Carry all flavours simultaneously to prevent rotation-driven revenue losses.' },
-                { icon: '📅', title: 'October is SAFARI\'s weak month', body: 'SAFARI AOV hit 1,218 KES in Oct 2025 vs TIMAURD 1,481 (21% gap). Kenyatta + Moi Day public holidays suppress SAFARI disproportionately. Targeted retention offer recommended.' },
-                { icon: '🐣', title: 'Easter underdelivered in 2026', body: 'Apr 13 (Easter week) AOV fell -0.7% despite Good Friday Apr 18. Mid-month cash trough outweighed holiday effect. Pre-order campaign pushed Tuesday of Holy Week would shift purchasing earlier.' },
-                { icon: '🥃', title: 'BWS is the structural AOV engine', body: 'SAFARI at 50–53% BWS vs TIMAURD 35–38%. Every major AOV spike in the dataset is driven by premium spirits. Protecting and growing BWS share is the primary commercial lever.' },
+                { icon: '📅', title: 'October is SAFARI\'s weak month', body: 'SAFARI AOV hit 1,218 KES in Oct vs TIMAURD 1,481 (21% gap). Kenyatta + Moi Day holidays suppress SAFARI disproportionately. Targeted retention offer needed.' },
+                { icon: '🐣', title: 'Easter underdelivered in 2026', body: 'Apr 13 AOV fell -0.7% despite Good Friday Apr 18. Pre-order campaign pushed Tuesday of Holy Week would shift purchasing earlier into the metric window.' },
+                { icon: '🥃', title: 'BWS is the structural AOV engine', body: 'SAFARI at 50–53% BWS vs TIMAURD 35–38%. Every major AOV spike is driven by premium spirits. Growing BWS share is the primary commercial lever.' },
               ].map(insight => (
                 <div key={insight.title} className="flex gap-3 p-3 rounded-lg bg-slate-800/60 border border-slate-700/50">
                   <span className="text-lg flex-shrink-0">{insight.icon}</span>
@@ -261,10 +265,9 @@ export default async function Dashboard() {
           </div>
         </section>
 
-        {/* Footer */}
-        <footer className="border-t border-slate-800 pt-6 pb-4 text-xs text-slate-600 flex items-center justify-between">
+        <footer className="border-t border-slate-800 pt-6 pb-4 text-xs text-slate-600 flex flex-wrap items-center justify-between gap-2">
           <span>Data: BigQuery export via Supabase · {weeklyAov.length} weekly data points · 547K orders analysed</span>
-          <span>MFC Commercial Dashboard · Built with Next.js + Supabase + Vercel</span>
+          <span>MFC Commercial Dashboard · Next.js + Supabase + Vercel</span>
         </footer>
       </main>
     </div>
