@@ -13,6 +13,7 @@ import NewSKUsTable from '@/components/NewSKUsTable'
 import MetricCard from '@/components/MetricCard'
 
 export const revalidate = 3600
+export const dynamic = 'force-dynamic'
 
 async function getData() {
   const [
