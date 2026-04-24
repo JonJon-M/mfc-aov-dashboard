@@ -32,8 +32,8 @@ function summaryStats(weeklyAov: WeeklyAOV[], monthly: MonthlySummary[]) {
   const baseT   = timaurd[0]
   const peakT   = timaurd.reduce((m, d) => (d.aov > m.aov ? d : m), timaurd[0] ?? { aov: 0, week: '' })
   const totalRev = monthly.reduce((s, d) => s + (d.rev ?? 0), 0)
-  const avgMargin = monthly.filter(d => d.warehouse === 'NBOF1 - TIMAURD')
-    .reduce((s, d, _, a) => s + d.margin_pct / a.length, 0)
+  const totalMargin = monthly.reduce((s, d) => s + (d.margin ?? 0), 0)
+  const avgMargin = totalRev > 0 ? (totalMargin / totalRev) * 100 : 0
   return { latestT, latestS, baseT, peakT, totalRev, avgMargin }
 }
 
@@ -139,7 +139,7 @@ export default function Dashboard() {
           <MetricCard
             title="Blended Margin"
             value={`${avgMargin.toFixed(1)}%`}
-            sub="TIMAURD avg gross margin"
+            sub="Both warehouses blended"
             icon="📊"
             color="rose"
           />

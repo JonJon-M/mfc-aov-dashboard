@@ -27,12 +27,15 @@ const CATEGORY_COLORS: Record<string, string> = {
 export default function CategoryMixChart({ data, warehouse }: Props) {
   const filtered = data.filter(d => d.warehouse === warehouse)
   const months = [...new Set(filtered.map(d => d.month))].sort()
-  const categories = [...new Set(filtered.map(d => d.category))]
+  const TOP_N = 8
+  const allCategories = [...new Set(filtered.map(d => d.category))]
     .sort((a, b) => {
       const aSum = filtered.filter(d => d.category === a).reduce((s, d) => s + d.share, 0)
       const bSum = filtered.filter(d => d.category === b).reduce((s, d) => s + d.share, 0)
       return bSum - aSum
-    }).slice(0, 8)
+    })
+  const categories = allCategories.slice(0, TOP_N)
+  const otherCategories = allCategories.slice(TOP_N)
 
   const chartData = months.map(m => {
     const row: Record<string, string | number> = { month: m }
@@ -40,6 +43,13 @@ export default function CategoryMixChart({ data, warehouse }: Props) {
       const found = filtered.find(d => d.month === m && d.category === cat)
       row[cat] = found ? +found.share.toFixed(1) : 0
     })
+    if (otherCategories.length > 0) {
+      const otherShare = otherCategories.reduce((s, cat) => {
+        const found = filtered.find(d => d.month === m && d.category === cat)
+        return s + (found ? found.share : 0)
+      }, 0)
+      row['Other'] = +otherShare.toFixed(1)
+    }
     return row
   })
 
@@ -69,6 +79,9 @@ export default function CategoryMixChart({ data, warehouse }: Props) {
           <Bar key={cat} dataKey={cat} stackId="a"
             fill={CATEGORY_COLORS[cat] || '#64748b'} />
         ))}
+        {otherCategories.length > 0 && (
+          <Bar key="Other" dataKey="Other" stackId="a" fill="#475569" />
+        )}
       </BarChart>
     </ResponsiveContainer>
   )
