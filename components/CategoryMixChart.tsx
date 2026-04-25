@@ -39,16 +39,15 @@ export default function CategoryMixChart({ data, warehouse }: Props) {
 
   const chartData = months.map(m => {
     const row: Record<string, string | number> = { month: m }
+    let top8Sum = 0
     categories.forEach(cat => {
       const found = filtered.find(d => d.month === m && d.category === cat)
-      row[cat] = found ? +found.share.toFixed(1) : 0
+      const val = found ? found.share : 0
+      row[cat] = val
+      top8Sum += val
     })
     if (otherCategories.length > 0) {
-      const otherShare = otherCategories.reduce((s, cat) => {
-        const found = filtered.find(d => d.month === m && d.category === cat)
-        return s + (found ? found.share : 0)
-      }, 0)
-      row['Other'] = +otherShare.toFixed(1)
+      row['Other'] = Math.max(0, +(100 - top8Sum).toFixed(2))
     }
     return row
   })
@@ -60,7 +59,7 @@ export default function CategoryMixChart({ data, warehouse }: Props) {
         <p className="font-semibold text-slate-200 mb-1">{label}</p>
         {[...payload].reverse().map((p: any) => (
           <p key={p.name} style={{ color: p.color }}>
-            {p.name.slice(0, 24)}: <strong>{p.value}%</strong>
+            {p.name.slice(0, 24)}: <strong>{(+p.value).toFixed(1)}%</strong>
           </p>
         ))}
       </div>
@@ -72,7 +71,7 @@ export default function CategoryMixChart({ data, warehouse }: Props) {
       <BarChart data={chartData} margin={{ top: 8, right: 12, left: 4, bottom: 4 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
         <XAxis dataKey="month" tick={{ fill: '#94a3b8', fontSize: 11 }} stroke="#334155" />
-        <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} stroke="#334155" tickFormatter={v => `${v}%`} />
+        <YAxis domain={[0, 100]} tick={{ fill: '#94a3b8', fontSize: 11 }} stroke="#334155" tickFormatter={v => `${v}%`} />
         <Tooltip content={<CustomTooltip />} />
         <Legend formatter={(v) => <span className="text-slate-300 text-xs">{v}</span>} />
         {categories.map(cat => (
